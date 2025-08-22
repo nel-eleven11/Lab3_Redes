@@ -1,5 +1,11 @@
 package main
 
+type MsgWrapper[T any] struct {
+	Destination string
+	// This should be a ProtocolMsg with a specific payload type
+	ProtocolMsg ProtocolMsg[T]
+}
+
 type ProtocolMsg[T any] struct {
 	Type    string `json:"type"`
 	Payload T      `json:"payload"`
