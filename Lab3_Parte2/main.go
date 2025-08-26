@@ -25,7 +25,9 @@ var NODE_TYPES = struct {
 }
 
 func formatRedisChannel(nodeId string) string {
-	return "sec20.topologia2." + nodeId
+	// FIXME: uncomment line below
+	// return "sec20.topologia2." + nodeId
+	return "sec20.topologia2." + nodeId + ".prueba1"
 }
 
 func main() {
@@ -96,6 +98,8 @@ func lsrMain(ctx context.Context, receiverChan chan any, senderChan chan any) {
 
 func parseMsgs(ctx context.Context, wg *sync.WaitGroup, rdb *redis.Client, receiverChan chan any) {
 	defer wg.Done()
+	log.Println("Parsing messages from redis...")
+	defer log.Println("Done parsing messages!")
 
 	// Receive messages from redis
 	pubsub := rdb.Subscribe(ctx, FULL_NODE_ID)
@@ -132,6 +136,8 @@ func parseMsgs(ctx context.Context, wg *sync.WaitGroup, rdb *redis.Client, recei
 
 func sendMsgs(ctx context.Context, wg *sync.WaitGroup, rdb *redis.Client, senderChan chan any) {
 	defer wg.Done()
+	log.Println("Sending messages to redis...")
+	defer log.Println("Done sending messages!")
 
 	for {
 		select {
