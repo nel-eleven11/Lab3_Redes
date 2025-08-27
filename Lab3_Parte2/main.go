@@ -114,7 +114,7 @@ func parseMsgs(ctx context.Context, wg *sync.WaitGroup, rdb *redis.Client, recei
 			var messageMsg ProtocolMsg[any]
 			err := json.Unmarshal([]byte(msg), &messageMsg)
 			if err != nil {
-				log.Printf("Received message: (`%s` -> `%s`):\n%#v", messageMsg.From, messageMsg.To, messageMsg.Payload)
+				log.Printf("Received message: `%s` -> `%s`(ttl: %d):\n%#v", messageMsg.From, messageMsg.To, messageMsg.Ttl, messageMsg.Payload)
 				receiverChan <- messageMsg
 			} else {
 				log.Printf("Received invalid message! %s\n%s", err, msg)
