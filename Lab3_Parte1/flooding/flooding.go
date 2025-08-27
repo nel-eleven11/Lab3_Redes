@@ -2,9 +2,10 @@ package main
 
 import (
 	"fmt"
-	"github.com/nel-eleven11/Lab3_Redes/lib"
 	"sync"
 	"time"
+
+	"github.com/nel-eleven11/Lab3_Redes/Lab3_Parte1/lib"
 )
 
 type FloodingNode struct {

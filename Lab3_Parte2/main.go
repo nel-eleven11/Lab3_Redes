@@ -72,10 +72,16 @@ func main() {
 	wg.Add(1)
 	go sendMsgs(ctx, &wg, rdb, senderChan)
 
+	node := NewNode(formatRedisChannel("nodo6"), map[string]int{
+		formatRedisChannel("nodo1"): 3,
+		formatRedisChannel("nodo2"): 7,
+		formatRedisChannel("nodo4"): 10,
+		// "sec20.topologia2.nodo4": 10,
+	})
 	for msg := range receiverChan {
 		switch msg.Proto {
 		case MESSAGE_PROTOS.LSR:
-			manageLSRMsg(ctx, msg, senderChan)
+			manageLSRMsg(ctx, msg, senderChan, node)
 		case MESSAGE_PROTOS.FLOOD:
 			manageFloodMsg(ctx, msg, senderChan)
 		default:
@@ -87,15 +93,51 @@ func main() {
 	wg.Wait()
 }
 
-func manageLSRMsg(ctx context.Context, msg ProtocolMsg[any], senderChan chan ProtocolMsg[any]) {
+func manageLSRMsg(ctx context.Context, msg ProtocolMsg[any], senderChan chan<- ProtocolMsg[any], node *Node) {
 	// Nelson implement LSR here!
+	switch payload := msg.Payload.(type) {
+	case string:
+		log.Println("Received string payload:", payload)
+		// HELLO
+		switch msg.Type {
+		case "hello":
+			// Add new node to DB
+			example := ProtocolMsg[string]{
+				Proto:   MESSAGE_PROTOS.LSR,
+				Type:    "hello",
+				From:    FULL_NODE_ID,
+				To:      "broadcast",
+				Ttl:     5,
+				Headers: []string{},
+				Payload: "",
+			}
+
+			// Por favor siempre escribir al channel de esta forma:
+			select {
+			case senderChan <- example.ToAny():
+			case <-ctx.Done():
+				return
+			}
+		case "message":
+			// If we're not the destination,
+			// Use DIJKSTRA table to send msg
+		default:
+			log.Printf("ERROR: Invalid message type received: %s\n%#v", msg.Type, msg)
+		}
+	case map[string]int:
+		log.Println("Received info payload:", payload)
+		// INFO
+		// Regenerate DIJKSTRA table
+	default:
+		log.Panicf("Invalid message received: %#v", msg)
+	}
 }
 
-func manageFloodMsg(ctx context.Context, msg ProtocolMsg[any], senderChan chan ProtocolMsg[any]) {
+func manageFloodMsg(ctx context.Context, msg ProtocolMsg[any], senderChan chan<- ProtocolMsg[any]) {
 	// Joaquin implement Flood here!
 }
 
-func parseMsgs(ctx context.Context, wg *sync.WaitGroup, rdb *redis.Client, receiverChan chan ProtocolMsg[any]) {
+func parseMsgs(ctx context.Context, wg *sync.WaitGroup, rdb *redis.Client, receiverChan chan<- ProtocolMsg[any]) {
 	defer wg.Done()
 	log.Println("Parsing messages from redis...")
 	defer log.Println("Done parsing messages!")
@@ -125,7 +167,7 @@ func parseMsgs(ctx context.Context, wg *sync.WaitGroup, rdb *redis.Client, recei
 	}
 }
 
-func sendMsgs(ctx context.Context, wg *sync.WaitGroup, rdb *redis.Client, senderChan chan ProtocolMsg[any]) {
+func sendMsgs(ctx context.Context, wg *sync.WaitGroup, rdb *redis.Client, senderChan <-chan ProtocolMsg[any]) {
 	defer wg.Done()
 	log.Println("Sending messages to redis...")
 	defer log.Println("Done sending messages!")
