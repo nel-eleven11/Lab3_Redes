@@ -16,7 +16,7 @@ const NODE_ID = "nodo6"
 
 var FULL_NODE_ID = formatRedisChannel(NODE_ID)
 
-var NODE_TYPES = struct {
+var MESSAGE_PROTOS = struct {
 	FLOOD string
 	LSR   string
 }{
@@ -32,7 +32,7 @@ func formatRedisChannel(nodeId string) string {
 
 func main() {
 	var nodeType string
-	flag.StringVar(&nodeType, "t", NODE_TYPES.FLOOD, "Node Type (flood or lsr)")
+	flag.StringVar(&nodeType, "t", MESSAGE_PROTOS.FLOOD, "Node Type (flood or lsr)")
 	flag.Parse()
 
 	err := godotenv.Load()
@@ -72,28 +72,27 @@ func main() {
 	wg.Add(1)
 	go sendMsgs(ctx, &wg, rdb, senderChan)
 
-	if nodeType == NODE_TYPES.FLOOD {
-		log.Println("Starting node as flood type...")
-		floodMain(ctx, receiverChan, senderChan)
-	} else {
-		log.Println("Starting node as LSR type...")
-		lsrMain(ctx, receiverChan, senderChan)
+	for msg := range receiverChan {
+		switch msg.Proto {
+		case MESSAGE_PROTOS.LSR:
+			manageLSRMsg(ctx, msg, senderChan)
+		case MESSAGE_PROTOS.FLOOD:
+			manageFloodMsg(ctx, msg, senderChan)
+		default:
+			log.Println("ERROR: Invalid message proto received!", msg.Proto)
+		}
 	}
 
 	cancelCtx()
 	wg.Wait()
 }
 
-// Implement Flood logic here!
-// Read a `{type}Payload` from the `receiverChan` if you want to receive a message!
-// Write a `MsgWrapper` to the `senderChan` if you want to send a message!
-func floodMain(ctx context.Context, receiverChan chan ProtocolMsg[any], senderChan chan ProtocolMsg[any]) {
+func manageLSRMsg(ctx context.Context, msg ProtocolMsg[any], senderChan chan ProtocolMsg[any]) {
+	// Nelson implement LSR here!
 }
 
-// Implement LSR logic here!
-// Read a `{type}Payload` from the `receiverChan` if you want to receive a message!
-// Write a `MsgWrapper` to the `senderChan` if you want to send a message!
-func lsrMain(ctx context.Context, receiverChan chan ProtocolMsg[any], senderChan chan ProtocolMsg[any]) {
+func manageFloodMsg(ctx context.Context, msg ProtocolMsg[any], senderChan chan ProtocolMsg[any]) {
+	// Joaquin implement Flood here!
 }
 
 func parseMsgs(ctx context.Context, wg *sync.WaitGroup, rdb *redis.Client, receiverChan chan ProtocolMsg[any]) {
