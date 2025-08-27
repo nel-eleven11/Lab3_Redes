@@ -56,11 +56,11 @@ func main() {
 	})
 
 	// This channel only receives `MsgWrapper` types!
-	senderChan := make(chan any, 10)
+	senderChan := make(chan ProtocolMsg[any], 10)
 	defer close(senderChan)
 
 	// This channel only receives payloads defined on `payloads.go`
-	receiverChan := make(chan any, 10)
+	receiverChan := make(chan ProtocolMsg[any], 10)
 	defer close(receiverChan)
 
 	ctx, cancelCtx := context.WithCancel(context.Background())
@@ -87,16 +87,16 @@ func main() {
 // Implement Flood logic here!
 // Read a `{type}Payload` from the `receiverChan` if you want to receive a message!
 // Write a `MsgWrapper` to the `senderChan` if you want to send a message!
-func floodMain(ctx context.Context, receiverChan chan any, senderChan chan any) {
+func floodMain(ctx context.Context, receiverChan chan ProtocolMsg[any], senderChan chan ProtocolMsg[any]) {
 }
 
 // Implement LSR logic here!
 // Read a `{type}Payload` from the `receiverChan` if you want to receive a message!
 // Write a `MsgWrapper` to the `senderChan` if you want to send a message!
-func lsrMain(ctx context.Context, receiverChan chan any, senderChan chan any) {
+func lsrMain(ctx context.Context, receiverChan chan ProtocolMsg[any], senderChan chan ProtocolMsg[any]) {
 }
 
-func parseMsgs(ctx context.Context, wg *sync.WaitGroup, rdb *redis.Client, receiverChan chan any) {
+func parseMsgs(ctx context.Context, wg *sync.WaitGroup, rdb *redis.Client, receiverChan chan ProtocolMsg[any]) {
 	defer wg.Done()
 	log.Println("Parsing messages from redis...")
 	defer log.Println("Done parsing messages!")
@@ -110,22 +110,14 @@ func parseMsgs(ctx context.Context, wg *sync.WaitGroup, rdb *redis.Client, recei
 		select {
 		case redisMsg := <-redisReceiveChannel:
 			msg := redisMsg.Payload
-			var initMsg ProtocolMsg[InitPayload]
-			var messageMsg ProtocolMsg[MessagePayload]
-			var doneMsg ProtocolMsg[DonePayload]
 
-			if err := json.Unmarshal([]byte(msg), &initMsg); err != nil {
-				// Handle init msg
-				receiverChan <- initMsg.Payload
-				continue
-			} else if err = json.Unmarshal([]byte(msg), &messageMsg); err != nil {
-				// Handle message msg
-				receiverChan <- messageMsg.Payload
-			} else if err = json.Unmarshal([]byte(msg), &doneMsg); err != nil {
-				// Handle done msg
-				receiverChan <- doneMsg.Payload
+			var messageMsg ProtocolMsg[any]
+			err := json.Unmarshal([]byte(msg), &messageMsg)
+			if err != nil {
+				log.Printf("Received message: (`%s` -> `%s`):\n%#v", messageMsg.From, messageMsg.To, messageMsg.Payload)
+				receiverChan <- messageMsg
 			} else {
-				log.Panicf("Message is not on the correct format!\n%s", err)
+				log.Printf("Received invalid message! %s\n%s", err, msg)
 			}
 
 		case <-ctx.Done():
@@ -134,7 +126,7 @@ func parseMsgs(ctx context.Context, wg *sync.WaitGroup, rdb *redis.Client, recei
 	}
 }
 
-func sendMsgs(ctx context.Context, wg *sync.WaitGroup, rdb *redis.Client, senderChan chan any) {
+func sendMsgs(ctx context.Context, wg *sync.WaitGroup, rdb *redis.Client, senderChan chan ProtocolMsg[any]) {
 	defer wg.Done()
 	log.Println("Sending messages to redis...")
 	defer log.Println("Done sending messages!")
@@ -142,27 +134,13 @@ func sendMsgs(ctx context.Context, wg *sync.WaitGroup, rdb *redis.Client, sender
 	for {
 		select {
 		case receivedMsg := <-senderChan:
-			switch msg := receivedMsg.(type) {
-			case MsgWrapper[InitPayload]:
-				publishMsg(ctx, rdb, msg)
-			case MsgWrapper[MessagePayload]:
-				publishMsg(ctx, rdb, msg)
-			case MsgWrapper[DonePayload]:
-				publishMsg(ctx, rdb, msg)
-			default:
-				log.Panicf("Received invalid MsgWrapper!\n%#v", receivedMsg)
+			jsonString, err := json.Marshal(receivedMsg)
+			if err != nil {
+				log.Panicf("Failed to marshal json: %#v", receivedMsg)
 			}
+			rdb.Publish(ctx, receivedMsg.To, jsonString)
 		case <-ctx.Done():
 			return
 		}
 	}
-}
-
-func publishMsg[T any](ctx context.Context, rdb *redis.Client, msg MsgWrapper[T]) {
-	jsonString, err := json.Marshal(msg.ProtocolMsg)
-	if err != nil {
-		log.Panicf("Failed to marshal json: %#v", msg)
-	}
-	rdb.Publish(ctx, msg.Destination, jsonString)
-
 }
