@@ -6,6 +6,7 @@ import (
 	"flag"
 	"log"
 	"os"
+	"os/signal"
 	"sync"
 
 	"github.com/joho/godotenv"
@@ -72,20 +73,31 @@ func main() {
 	wg.Add(1)
 	go sendMsgs(ctx, &wg, rdb, senderChan)
 
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+
 	node := NewNode(formatRedisChannel("nodo6"), map[string]int{
 		formatRedisChannel("nodo1"): 3,
 		formatRedisChannel("nodo2"): 7,
 		formatRedisChannel("nodo4"): 10,
 		// "sec20.topologia2.nodo4": 10,
 	})
-	for msg := range receiverChan {
-		switch msg.Proto {
-		case MESSAGE_PROTOS.LSR:
-			manageLSRMsg(ctx, msg, senderChan, node)
-		case MESSAGE_PROTOS.FLOOD:
-			manageFloodMsg(ctx, msg, senderChan)
-		default:
-			log.Println("ERROR: Invalid message proto received!", msg.Proto)
+
+consumerLoop:
+	for {
+		select {
+		case msg := <-receiverChan:
+			switch msg.Proto {
+			case MESSAGE_PROTOS.LSR:
+				manageLSRMsg(ctx, msg, senderChan, node)
+			case MESSAGE_PROTOS.FLOOD:
+				manageFloodMsg(ctx, msg, senderChan)
+			default:
+				log.Println("ERROR: Invalid message proto received!", msg.Proto)
+			}
+		case <-c:
+			log.Println("Interrupt signal received! Stopping node...")
+			break consumerLoop
 		}
 	}
 
@@ -135,23 +147,23 @@ func manageLSRMsg(ctx context.Context, msg ProtocolMsg[any], senderChan chan<- P
 
 func manageFloodMsg(ctx context.Context, msg ProtocolMsg[any], senderChan chan<- ProtocolMsg[any]) {
 	log.Printf("Received flood message from %s with TTL %d", msg.From, msg.Ttl)
-	
+
 	// Check if TTL is 0, if so, discard the message
 	if msg.Ttl <= 0 {
 		log.Println("TTL expired, discarding message")
 		return
 	}
-	
+
 	// Reduce TTL by 1
 	msg.Ttl--
-	
+
 	// Get the neighbors from the hardcoded configuration
 	neighbors := []string{
 		formatRedisChannel("nodo1"),
-		formatRedisChannel("nodo2"), 
+		formatRedisChannel("nodo2"),
 		formatRedisChannel("nodo4"),
 	}
-	
+
 	// Forward the message to all neighbors except the sender
 	for _, neighbor := range neighbors {
 		if neighbor != msg.From {
@@ -165,9 +177,9 @@ func manageFloodMsg(ctx context.Context, msg ProtocolMsg[any], senderChan chan<-
 				Headers: msg.Headers,
 				Payload: msg.Payload,
 			}
-			
+
 			log.Printf("Forwarding message to %s with TTL %d", neighbor, forwardMsg.Ttl)
-			
+
 			// Send the message using the pattern from manageLSRMsg
 			select {
 			case senderChan <- forwardMsg:
