@@ -134,7 +134,48 @@ func manageLSRMsg(ctx context.Context, msg ProtocolMsg[any], senderChan chan<- P
 }
 
 func manageFloodMsg(ctx context.Context, msg ProtocolMsg[any], senderChan chan<- ProtocolMsg[any]) {
-	// Joaquin implement Flood here!
+	log.Printf("Received flood message from %s with TTL %d", msg.From, msg.Ttl)
+	
+	// Check if TTL is 0, if so, discard the message
+	if msg.Ttl <= 0 {
+		log.Println("TTL expired, discarding message")
+		return
+	}
+	
+	// Reduce TTL by 1
+	msg.Ttl--
+	
+	// Get the neighbors from the hardcoded configuration
+	neighbors := []string{
+		formatRedisChannel("nodo1"),
+		formatRedisChannel("nodo2"), 
+		formatRedisChannel("nodo4"),
+	}
+	
+	// Forward the message to all neighbors except the sender
+	for _, neighbor := range neighbors {
+		if neighbor != msg.From {
+			// Create a copy of the message for each neighbor
+			forwardMsg := ProtocolMsg[any]{
+				Proto:   msg.Proto,
+				Type:    msg.Type,
+				From:    FULL_NODE_ID, // Update sender to current node
+				To:      neighbor,
+				Ttl:     msg.Ttl,
+				Headers: msg.Headers,
+				Payload: msg.Payload,
+			}
+			
+			log.Printf("Forwarding message to %s with TTL %d", neighbor, forwardMsg.Ttl)
+			
+			// Send the message using the pattern from manageLSRMsg
+			select {
+			case senderChan <- forwardMsg:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}
 }
 
 func parseMsgs(ctx context.Context, wg *sync.WaitGroup, rdb *redis.Client, receiverChan chan<- ProtocolMsg[any]) {
