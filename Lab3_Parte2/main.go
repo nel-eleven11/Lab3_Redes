@@ -16,7 +16,13 @@ import (
 
 const NODE_ID = "nodo6"
 
-var FULL_NODE_ID = "sec20.topologia2." + NODE_ID + ".nodoa"
+var FULL_NODE_ID = "sec20.topologia2." + NODE_ID + ".nodoc"
+
+var node = NewNode(formatRedisChannel("nodo6"), map[string]int{
+	// formatRedisChannel("nodo1"): 3,
+	"sec20.topologia2.nodo6.nodob": 5,
+	// "sec20.topologia2.nodo6.nodoc": 3,
+})
 
 var MESSAGE_PROTOS = struct {
 	FLOOD string
@@ -76,12 +82,6 @@ func main() {
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
-
-	node := NewNode(formatRedisChannel("nodo6"), map[string]int{
-		// formatRedisChannel("nodo1"): 3,
-		"sec20.topologia2.nodo6.nodob": 5,
-		// "sec20.topologia2.nodo6.nodoc": 3,
-	})
 
 	log.Println("Connected as:", FULL_NODE_ID, "with type:", nodeType)
 	senderChan <- ProtocolMsg[string]{
