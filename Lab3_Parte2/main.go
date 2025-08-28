@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"sync"
+	"time"
 
 	"github.com/joho/godotenv"
 	"github.com/redis/go-redis/v9"
@@ -15,7 +16,7 @@ import (
 
 const NODE_ID = "nodo6"
 
-var FULL_NODE_ID = formatRedisChannel(NODE_ID)
+var FULL_NODE_ID = "sec20.topologia2." + NODE_ID + ".prueba2"
 
 var MESSAGE_PROTOS = struct {
 	FLOOD string
@@ -77,13 +78,32 @@ func main() {
 	signal.Notify(c, os.Interrupt)
 
 	node := NewNode(formatRedisChannel("nodo6"), map[string]int{
-		formatRedisChannel("nodo1"): 3,
-		formatRedisChannel("nodo2"): 7,
-		formatRedisChannel("nodo4"): 10,
-		// "sec20.topologia2.nodo4": 10,
+		// formatRedisChannel("nodo1"): 3,
+		"sec20.topologia2.nodo6.prueba1": 5,
 	})
 
 	log.Println("Connected as:", FULL_NODE_ID, "with type:", nodeType)
+	senderChan <- ProtocolMsg[string]{
+		Proto:   nodeType,
+		Type:    "hello",
+		From:    FULL_NODE_ID,
+		To:      "broadcast",
+		Ttl:     5,
+		Headers: []string{},
+		Payload: "",
+	}.ToAny()
+
+	for id := range node.neighbors {
+		senderChan <- ProtocolMsg[map[string]int]{
+			Proto:   MESSAGE_PROTOS.LSR,
+			Type:    "info",
+			From:    FULL_NODE_ID,
+			To:      id,
+			Ttl:     5,
+			Headers: []string{},
+			Payload: node.neighbors,
+		}.ToAny()
+	}
 consumerLoop:
 	for {
 		select {
@@ -98,9 +118,20 @@ consumerLoop:
 			}
 		case <-c:
 			log.Println("Interrupt signal received! Stopping node...")
+			// senderChan <- ProtocolMsg[string]{
+			// 	Proto:   MESSAGE_PROTOS.LSR,
+			// 	Type:    "message",
+			// 	From:    FULL_NODE_ID,
+			// 	To:      "sec20.topologia2.nodo6.prueba1",
+			// 	Ttl:     5,
+			// 	Headers: []string{},
+			// 	Payload: "Hola",
+			// }.ToAny()
 			break consumerLoop
 		}
 	}
+
+	time.Sleep(2 * time.Second)
 
 	cancelCtx()
 	wg.Wait()
@@ -225,7 +256,6 @@ func manageLSRMsg(ctx context.Context, msg ProtocolMsg[any], senderChan chan<- P
 	}
 }
 
-
 func manageFloodMsg(ctx context.Context, msg ProtocolMsg[any], senderChan chan<- ProtocolMsg[any]) {
 	log.Printf("Received flood message from %s with TTL %d", msg.From, msg.Ttl)
 
@@ -277,7 +307,7 @@ func parseMsgs(ctx context.Context, wg *sync.WaitGroup, rdb *redis.Client, recei
 	defer log.Println("Done parsing messages!")
 
 	// Receive messages from redis
-	pubsub := rdb.Subscribe(ctx, FULL_NODE_ID)
+	pubsub := rdb.Subscribe(ctx, FULL_NODE_ID, "broadcast")
 	defer pubsub.Close()
 	redisReceiveChannel := pubsub.Channel()
 
