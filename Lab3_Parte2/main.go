@@ -83,6 +83,7 @@ func main() {
 		// "sec20.topologia2.nodo4": 10,
 	})
 
+	log.Println("Connected as:", FULL_NODE_ID, "with type:", nodeType)
 consumerLoop:
 	for {
 		select {
@@ -207,7 +208,7 @@ func parseMsgs(ctx context.Context, wg *sync.WaitGroup, rdb *redis.Client, recei
 
 			var messageMsg ProtocolMsg[any]
 			err := json.Unmarshal([]byte(msg), &messageMsg)
-			if err != nil {
+			if err == nil {
 				log.Printf("Received message: `%s` -> `%s`(ttl: %d):\n%#v", messageMsg.From, messageMsg.To, messageMsg.Ttl, messageMsg.Payload)
 				receiverChan <- messageMsg
 			} else {
@@ -228,11 +229,13 @@ func sendMsgs(ctx context.Context, wg *sync.WaitGroup, rdb *redis.Client, sender
 	for {
 		select {
 		case receivedMsg := <-senderChan:
+			log.Printf("Sending msg:\n%#v", receivedMsg)
 			jsonString, err := json.Marshal(receivedMsg)
 			if err != nil {
 				log.Panicf("Failed to marshal json: %#v", receivedMsg)
 			}
 			rdb.Publish(ctx, receivedMsg.To, jsonString)
+			log.Printf("Done!")
 		case <-ctx.Done():
 			return
 		}
