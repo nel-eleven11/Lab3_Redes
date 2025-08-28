@@ -1,5 +1,10 @@
 package main
 
+type MsgWrapper[T any] struct {
+	InnerMsg      ProtocolMsg[T]
+	TargetChannel string
+}
+
 type ProtocolMsg[T any] struct {
 	Proto   string   `json:"proto"`
 	Type    string   `json:"type"`
@@ -22,5 +27,12 @@ func (p ProtocolMsg[T]) ToAny() ProtocolMsg[any] {
 		Ttl:     p.Ttl,
 		Headers: p.Headers,
 		Payload: p.Payload,
+	}
+}
+
+func (p ProtocolMsg[T]) Wrapped(targetChannel string) MsgWrapper[T] {
+	return MsgWrapper[T]{
+		InnerMsg:      p,
+		TargetChannel: targetChannel,
 	}
 }

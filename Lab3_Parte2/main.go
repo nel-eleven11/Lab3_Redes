@@ -16,7 +16,7 @@ import (
 
 const NODE_ID = "nodo6"
 
-var FULL_NODE_ID = "sec20.topologia2." + NODE_ID + ".prueba2"
+var FULL_NODE_ID = "sec20.topologia2." + NODE_ID + ".nodoc"
 
 var MESSAGE_PROTOS = struct {
 	FLOOD string
@@ -58,7 +58,7 @@ func main() {
 	})
 
 	// This channel only receives `MsgWrapper` types!
-	senderChan := make(chan ProtocolMsg[any], 10)
+	senderChan := make(chan MsgWrapper[any], 10)
 	defer close(senderChan)
 
 	// This channel only receives payloads defined on `payloads.go`
@@ -79,7 +79,8 @@ func main() {
 
 	node := NewNode(formatRedisChannel("nodo6"), map[string]int{
 		// formatRedisChannel("nodo1"): 3,
-		"sec20.topologia2.nodo6.prueba1": 5,
+		"sec20.topologia2.nodo6.nodob": 5,
+		// "sec20.topologia2.nodo6.nodoc": 3,
 	})
 
 	log.Println("Connected as:", FULL_NODE_ID, "with type:", nodeType)
@@ -91,7 +92,7 @@ func main() {
 		Ttl:     5,
 		Headers: []string{},
 		Payload: "",
-	}.ToAny()
+	}.ToAny().Wrapped("broadcast")
 
 	for id := range node.neighbors {
 		senderChan <- ProtocolMsg[map[string]int]{
@@ -102,7 +103,7 @@ func main() {
 			Ttl:     5,
 			Headers: []string{},
 			Payload: node.neighbors,
-		}.ToAny()
+		}.ToAny().Wrapped(id)
 	}
 consumerLoop:
 	for {
@@ -118,15 +119,15 @@ consumerLoop:
 			}
 		case <-c:
 			log.Println("Interrupt signal received! Stopping node...")
-			// senderChan <- ProtocolMsg[string]{
-			// 	Proto:   MESSAGE_PROTOS.LSR,
-			// 	Type:    "message",
-			// 	From:    FULL_NODE_ID,
-			// 	To:      "sec20.topologia2.nodo6.prueba1",
-			// 	Ttl:     5,
-			// 	Headers: []string{},
-			// 	Payload: "Hola",
-			// }.ToAny()
+			senderChan <- ProtocolMsg[string]{
+				Proto:   MESSAGE_PROTOS.LSR,
+				Type:    "message",
+				From:    FULL_NODE_ID,
+				To:      "sec20.topologia2.nodo6.nodoa",
+				Ttl:     5,
+				Headers: []string{},
+				Payload: "Hola",
+			}.ToAny().Wrapped("sec20.topologia2.nodo6.nodob")
 			break consumerLoop
 		}
 	}
@@ -137,7 +138,7 @@ consumerLoop:
 	wg.Wait()
 }
 
-func manageLSRMsg(ctx context.Context, msg ProtocolMsg[any], senderChan chan<- ProtocolMsg[any], node *Node) {
+func manageLSRMsg(ctx context.Context, msg ProtocolMsg[any], senderChan chan<- MsgWrapper[any], node *Node) {
 	// Ensure our own LSA exists in the DB
 	ensureLocalLSA(node)
 
@@ -197,7 +198,7 @@ func manageLSRMsg(ctx context.Context, msg ProtocolMsg[any], senderChan chan<- P
 				Headers: rotateHeaders(msg.Headers, FULL_NODE_ID),
 				Payload: payload,
 			}
-			log.Printf("LSR: Forwarding message to %s via %s (ttl %d)", msg.To, nextHop, forward.Ttl)
+			log.Printf("LSR: Forwarding message to %s via %s (ttl %d)\n", msg.To, nextHop, forward.Ttl)
 			select {
 			case senderChan <- forward:
 			case <-ctx.Done():
@@ -205,19 +206,19 @@ func manageLSRMsg(ctx context.Context, msg ProtocolMsg[any], senderChan chan<- P
 			}
 
 		default:
-			log.Printf("ERROR: Invalid LSR string-type message `%s`", msg.Type)
+			log.Printf("ERROR: Invalid LSR string-type message `%s`\n", msg.Type)
 		}
 
 	case map[string]any:
 		// INFO: neighbors->cost announced by router msg.From
 		if msg.Type != "info" {
-			log.Printf("ERROR: Unexpected map payload for type `%s`", msg.Type)
+			log.Printf("ERROR: Unexpected map payload for type `%s`\n", msg.Type)
 			return
 		}
 
 		// Loop avoidance: if I'm already present in headers, drop
 		if containsHeader(msg.Headers, FULL_NODE_ID) {
-			log.Printf("LSR: Drop INFO from %s (loop detected in headers: %v)", msg.From, msg.Headers)
+			log.Printf("LSR: Drop INFO from %s (loop detected in headers: %v)\n", msg.From, msg.Headers)
 			return
 		}
 
@@ -260,7 +261,7 @@ func manageLSRMsg(ctx context.Context, msg ProtocolMsg[any], senderChan chan<- P
 	}
 }
 
-func manageFloodMsg(ctx context.Context, msg ProtocolMsg[any], senderChan chan<- ProtocolMsg[any], nodes *Node) {
+func manageFloodMsg(ctx context.Context, msg ProtocolMsg[any], senderChan chan<- MsgWrapper[any], nodes *Node) {
 	log.Printf("Received flood message from %s with TTL %d", msg.From, msg.Ttl)
 
 	// Check if TTL is 0, if so, discard the message
@@ -297,7 +298,10 @@ func manageFloodMsg(ctx context.Context, msg ProtocolMsg[any], senderChan chan<-
 
 			// Send the message using the pattern from manageLSRMsg
 			select {
-			case senderChan <- forwardMsg:
+			case senderChan <- MsgWrapper[any]{
+				InnerMsg:      forwardMsg,
+				TargetChannel: neighbor,
+			}:
 			case <-ctx.Done():
 				return
 			}
@@ -335,7 +339,7 @@ func parseMsgs(ctx context.Context, wg *sync.WaitGroup, rdb *redis.Client, recei
 	}
 }
 
-func sendMsgs(ctx context.Context, wg *sync.WaitGroup, rdb *redis.Client, senderChan <-chan ProtocolMsg[any]) {
+func sendMsgs(ctx context.Context, wg *sync.WaitGroup, rdb *redis.Client, senderChan <-chan MsgWrapper[any]) {
 	defer wg.Done()
 	log.Println("Sending messages to redis...")
 	defer log.Println("Done sending messages!")
@@ -344,11 +348,11 @@ func sendMsgs(ctx context.Context, wg *sync.WaitGroup, rdb *redis.Client, sender
 		select {
 		case receivedMsg := <-senderChan:
 			log.Printf("Sending msg:\n%#v", receivedMsg)
-			jsonString, err := json.Marshal(receivedMsg)
+			jsonString, err := json.Marshal(receivedMsg.InnerMsg)
 			if err != nil {
 				log.Panicf("Failed to marshal json: %#v", receivedMsg)
 			}
-			rdb.Publish(ctx, receivedMsg.To, jsonString)
+			rdb.Publish(ctx, receivedMsg.TargetChannel, jsonString)
 			log.Printf("Done!")
 		case <-ctx.Done():
 			return
