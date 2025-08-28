@@ -16,7 +16,7 @@ import (
 
 const NODE_ID = "nodo6"
 
-var FULL_NODE_ID = "sec20.topologia2." + NODE_ID + ".prueba2"
+var FULL_NODE_ID = "sec20.topologia2." + NODE_ID + ".prueba1"
 
 var MESSAGE_PROTOS = struct {
 	FLOOD string
@@ -79,7 +79,7 @@ func main() {
 
 	node := NewNode(formatRedisChannel("nodo6"), map[string]int{
 		// formatRedisChannel("nodo1"): 3,
-		"sec20.topologia2.nodo6.prueba1": 5,
+		"sec20.topologia2.nodo6.prueba2": 5,
 	})
 
 	log.Println("Connected as:", FULL_NODE_ID, "with type:", nodeType)
@@ -208,7 +208,7 @@ func manageLSRMsg(ctx context.Context, msg ProtocolMsg[any], senderChan chan<- P
 			log.Printf("ERROR: Invalid LSR string-type message `%s`", msg.Type)
 		}
 
-	case map[string]int:
+	case map[string]any:
 		// INFO: neighbors->cost announced by router msg.From
 		if msg.Type != "info" {
 			log.Printf("ERROR: Unexpected map payload for type `%s`", msg.Type)
@@ -222,7 +222,11 @@ func manageLSRMsg(ctx context.Context, msg ProtocolMsg[any], senderChan chan<- P
 		}
 
 		// Update LSDB
-		changed := updateLSA(msg.From, payload)
+		payload_int := make(map[string]int)
+		for key,v:= range payload {
+			payload_int[key] = v.(int)
+		}
+		changed := updateLSA(msg.From, payload_int)
 		if changed {
 			log.Printf("LSR: Updated LSA from %s", msg.From)
 		}
