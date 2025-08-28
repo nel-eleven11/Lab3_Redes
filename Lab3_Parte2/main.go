@@ -16,7 +16,7 @@ import (
 
 const NODE_ID = "nodo6"
 
-var FULL_NODE_ID = "sec20.topologia2." + NODE_ID + ".prueba1"
+var FULL_NODE_ID = "sec20.topologia2." + NODE_ID + ".prueba2"
 
 var MESSAGE_PROTOS = struct {
 	FLOOD string
@@ -79,7 +79,7 @@ func main() {
 
 	node := NewNode(formatRedisChannel("nodo6"), map[string]int{
 		// formatRedisChannel("nodo1"): 3,
-		"sec20.topologia2.nodo6.prueba2": 5,
+		"sec20.topologia2.nodo6.prueba1": 5,
 	})
 
 	log.Println("Connected as:", FULL_NODE_ID, "with type:", nodeType)
@@ -112,7 +112,7 @@ consumerLoop:
 			case MESSAGE_PROTOS.LSR:
 				manageLSRMsg(ctx, msg, senderChan, node)
 			case MESSAGE_PROTOS.FLOOD:
-				manageFloodMsg(ctx, msg, senderChan)
+				manageFloodMsg(ctx, msg, senderChan, node)
 			default:
 				log.Println("ERROR: Invalid message proto received!", msg.Proto)
 			}
@@ -223,8 +223,8 @@ func manageLSRMsg(ctx context.Context, msg ProtocolMsg[any], senderChan chan<- P
 
 		// Update LSDB
 		payload_int := make(map[string]int)
-		for key,v:= range payload {
-			payload_int[key] = v.(int)
+		for key, v := range payload {
+			payload_int[key] = int(v.(float64))
 		}
 		changed := updateLSA(msg.From, payload_int)
 		if changed {
@@ -260,7 +260,7 @@ func manageLSRMsg(ctx context.Context, msg ProtocolMsg[any], senderChan chan<- P
 	}
 }
 
-func manageFloodMsg(ctx context.Context, msg ProtocolMsg[any], senderChan chan<- ProtocolMsg[any]) {
+func manageFloodMsg(ctx context.Context, msg ProtocolMsg[any], senderChan chan<- ProtocolMsg[any], nodes *Node) {
 	log.Printf("Received flood message from %s with TTL %d", msg.From, msg.Ttl)
 
 	// Check if TTL is 0, if so, discard the message
@@ -273,14 +273,14 @@ func manageFloodMsg(ctx context.Context, msg ProtocolMsg[any], senderChan chan<-
 	msg.Ttl--
 
 	// Get the neighbors from the hardcoded configuration
-	neighbors := []string{
-		formatRedisChannel("nodo1"),
-		formatRedisChannel("nodo2"),
-		formatRedisChannel("nodo4"),
-	}
+	// neighbors := []string{
+	// 	formatRedisChannel("nodo1"),
+	// 	formatRedisChannel("nodo2"),
+	// 	formatRedisChannel("nodo4"),
+	// }
 
 	// Forward the message to all neighbors except the sender
-	for _, neighbor := range neighbors {
+	for neighbor := range nodes.neighbors {
 		if neighbor != msg.From {
 			// Create a copy of the message for each neighbor
 			forwardMsg := ProtocolMsg[any]{
