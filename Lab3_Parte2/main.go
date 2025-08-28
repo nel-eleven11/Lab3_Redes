@@ -16,7 +16,7 @@ import (
 
 const NODE_ID = "nodo6"
 
-var FULL_NODE_ID = "sec20.topologia2." + NODE_ID + ".nodoc"
+var FULL_NODE_ID = "sec20.topologia2." + NODE_ID + ".nodoa"
 
 var MESSAGE_PROTOS = struct {
 	FLOOD string
@@ -159,21 +159,19 @@ func manageLSRMsg(ctx context.Context, msg ProtocolMsg[any], senderChan chan<- M
 			for k, v := range node.neighbors {
 				info[k] = v
 			}
-			for neighbor := range node.neighbors {
-				forward := ProtocolMsg[any]{
-					Proto:   MESSAGE_PROTOS.LSR,
-					Type:    "info",
-					From:    FULL_NODE_ID,
-					To:      neighbor,
-					Ttl:     5,
-					Headers: rotateHeaders(nil, FULL_NODE_ID),
-					Payload: info,
-				}
-				select {
-				case senderChan <- forward:
-				case <-ctx.Done():
-					return
-				}
+			forward := ProtocolMsg[any]{
+				Proto:   MESSAGE_PROTOS.LSR,
+				Type:    "info",
+				From:    FULL_NODE_ID,
+				To:      "broadcast",
+				Ttl:     5,
+				Headers: rotateHeaders(nil, FULL_NODE_ID),
+				Payload: info,
+			}.Wrapped("broadcast")
+			select {
+			case senderChan <- forward:
+			case <-ctx.Done():
+				return
 			}
 
 		case "message":
@@ -193,12 +191,12 @@ func manageLSRMsg(ctx context.Context, msg ProtocolMsg[any], senderChan chan<- M
 				Proto:   msg.Proto,
 				Type:    msg.Type,
 				From:    FULL_NODE_ID,
-				To:      nextHop,
+				To:      msg.To,
 				Ttl:     msg.Ttl - 1,
 				Headers: rotateHeaders(msg.Headers, FULL_NODE_ID),
 				Payload: payload,
-			}
-			log.Printf("LSR: Forwarding message to %s via %s (ttl %d)\n", msg.To, nextHop, forward.Ttl)
+			}.Wrapped(nextHop)
+			log.Printf("LSR: Forwarding message to %s via %s (ttl %d)\n", msg.To, nextHop, forward.InnerMsg.Ttl)
 			select {
 			case senderChan <- forward:
 			case <-ctx.Done():
@@ -243,11 +241,11 @@ func manageLSRMsg(ctx context.Context, msg ProtocolMsg[any], senderChan chan<- M
 					Proto:   msg.Proto,
 					Type:    msg.Type,
 					From:    FULL_NODE_ID,
-					To:      neighbor,
+					To:      msg.To,
 					Ttl:     msg.Ttl - 1,
 					Headers: newHeaders,
 					Payload: payload,
-				}
+				}.Wrapped(neighbor)
 				select {
 				case senderChan <- forward:
 				case <-ctx.Done():
