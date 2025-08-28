@@ -107,44 +107,124 @@ consumerLoop:
 }
 
 func manageLSRMsg(ctx context.Context, msg ProtocolMsg[any], senderChan chan<- ProtocolMsg[any], node *Node) {
-	// Nelson implement LSR here!
+	// Ensure our own LSA exists in the DB
+	ensureLocalLSA(node)
+
+	// TTL check
+	if msg.Ttl <= 0 {
+		log.Println("LSR: TTL expired, dropping")
+		return
+	}
+
 	switch payload := msg.Payload.(type) {
+
 	case string:
-		log.Println("Received string payload:", payload)
-		// HELLO
+		// HELLO or MESSAGE (string payload)
 		switch msg.Type {
 		case "hello":
-			// Add new node to DB
-			example := ProtocolMsg[string]{
-				Proto:   MESSAGE_PROTOS.LSR,
-				Type:    "hello",
-				From:    FULL_NODE_ID,
-				To:      "broadcast",
-				Ttl:     5,
-				Headers: []string{},
-				Payload: "",
+			// Do not retransmit. Optional: announce my state (INFO) to neighbors to bootstrap.
+			info := make(map[string]int, len(node.neighbors))
+			for k, v := range node.neighbors {
+				info[k] = v
+			}
+			for neighbor := range node.neighbors {
+				forward := ProtocolMsg[any]{
+					Proto:   MESSAGE_PROTOS.LSR,
+					Type:    "info",
+					From:    FULL_NODE_ID,
+					To:      neighbor,
+					Ttl:     5,
+					Headers: rotateHeaders(nil, FULL_NODE_ID),
+					Payload: info,
+				}
+				select {
+				case senderChan <- forward:
+				case <-ctx.Done():
+					return
+				}
 			}
 
-			// Por favor siempre escribir al channel de esta forma:
+		case "message":
+			// If I'm the destination, consume it
+			if msg.To == FULL_NODE_ID {
+				log.Printf("LSR: Message for me from %s: %s\n", msg.From, payload)
+				return
+			}
+			// Otherwise, route using Dijkstra
+			graph := buildGraphFromLSDB()
+			nextHop := computeNextHop(graph, FULL_NODE_ID, msg.To)
+			if nextHop == "" {
+				log.Printf("LSR: No route to %s, dropping. Graph nodes: %d\n", msg.To, len(graph))
+				return
+			}
+			forward := ProtocolMsg[any]{
+				Proto:   msg.Proto,
+				Type:    msg.Type,
+				From:    FULL_NODE_ID,
+				To:      nextHop,
+				Ttl:     msg.Ttl - 1,
+				Headers: rotateHeaders(msg.Headers, FULL_NODE_ID),
+				Payload: payload,
+			}
+			log.Printf("LSR: Forwarding message to %s via %s (ttl %d)", msg.To, nextHop, forward.Ttl)
 			select {
-			case senderChan <- example.ToAny():
+			case senderChan <- forward:
 			case <-ctx.Done():
 				return
 			}
-		case "message":
-			// If we're not the destination,
-			// Use DIJKSTRA table to send msg
+
 		default:
-			log.Printf("ERROR: Invalid message type received: %s\n%#v", msg.Type, msg)
+			log.Printf("ERROR: Invalid LSR string-type message `%s`", msg.Type)
 		}
+
 	case map[string]int:
-		log.Println("Received info payload:", payload)
-		// INFO
-		// Regenerate DIJKSTRA table
+		// INFO: neighbors->cost announced by router msg.From
+		if msg.Type != "info" {
+			log.Printf("ERROR: Unexpected map payload for type `%s`", msg.Type)
+			return
+		}
+
+		// Loop avoidance: if I'm already present in headers, drop
+		if containsHeader(msg.Headers, FULL_NODE_ID) {
+			log.Printf("LSR: Drop INFO from %s (loop detected in headers: %v)", msg.From, msg.Headers)
+			return
+		}
+
+		// Update LSDB
+		changed := updateLSA(msg.From, payload)
+		if changed {
+			log.Printf("LSR: Updated LSA from %s", msg.From)
+		}
+
+		// Retransmit to all my neighbors (except the one who sent it), decreasing TTL and rotating headers
+		if msg.Ttl-1 > 0 {
+			newHeaders := rotateHeaders(msg.Headers, FULL_NODE_ID)
+			for neighbor := range node.neighbors {
+				if neighbor == msg.From {
+					continue
+				}
+				forward := ProtocolMsg[any]{
+					Proto:   msg.Proto,
+					Type:    msg.Type,
+					From:    FULL_NODE_ID,
+					To:      neighbor,
+					Ttl:     msg.Ttl - 1,
+					Headers: newHeaders,
+					Payload: payload,
+				}
+				select {
+				case senderChan <- forward:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+
 	default:
-		log.Panicf("Invalid message received: %#v", msg)
+		log.Panicf("Invalid LSR message payload: %#v", msg)
 	}
 }
+
 
 func manageFloodMsg(ctx context.Context, msg ProtocolMsg[any], senderChan chan<- ProtocolMsg[any]) {
 	log.Printf("Received flood message from %s with TTL %d", msg.From, msg.Ttl)
