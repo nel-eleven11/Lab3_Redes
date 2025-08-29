@@ -1,14 +1,16 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"flag"
 	"log"
+	"maps"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
-	"time"
 
 	"github.com/joho/godotenv"
 	"github.com/redis/go-redis/v9"
@@ -17,8 +19,9 @@ import (
 const NODE_ID = "nodo6"
 
 var FULL_NODE_ID = "sec20.topologia2." + NODE_ID + ".nodoc"
+var NODE_TYPE string
 
-var node = NewNode(formatRedisChannel("nodo6"), map[string]int{
+var NODE = NewNode(formatRedisChannel("nodo6"), map[string]int{
 	// formatRedisChannel("nodo1"): 3,
 	"sec20.topologia2.nodo6.nodob": 5,
 	// "sec20.topologia2.nodo6.nodoc": 3,
@@ -39,8 +42,7 @@ func formatRedisChannel(nodeId string) string {
 }
 
 func main() {
-	var nodeType string
-	flag.StringVar(&nodeType, "t", MESSAGE_PROTOS.FLOOD, "Node Type (flood or lsr)")
+	flag.StringVar(&NODE_TYPE, "t", MESSAGE_PROTOS.FLOOD, "Node Type (flood or lsr)")
 	flag.Parse()
 
 	err := godotenv.Load()
@@ -79,13 +81,15 @@ func main() {
 	go parseMsgs(ctx, &wg, rdb, receiverChan)
 	wg.Add(1)
 	go sendMsgs(ctx, &wg, rdb, senderChan)
+	wg.Add(1)
+	go readStdin(ctx, &wg, senderChan, receiverChan)
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
 
-	log.Println("Connected as:", FULL_NODE_ID, "with type:", nodeType)
+	log.Println("Connected as:", FULL_NODE_ID, "with type:", NODE_TYPE)
 	senderChan <- ProtocolMsg[string]{
-		Proto:   nodeType,
+		Proto:   NODE_TYPE,
 		Type:    "hello",
 		From:    FULL_NODE_ID,
 		To:      "broadcast",
@@ -94,7 +98,7 @@ func main() {
 		Payload: "",
 	}.ToAny().Wrapped("broadcast")
 
-	for id := range node.neighbors {
+	for id := range NODE.neighbors {
 		senderChan <- ProtocolMsg[map[string]int]{
 			Proto:   MESSAGE_PROTOS.LSR,
 			Type:    "info",
@@ -102,7 +106,7 @@ func main() {
 			To:      id,
 			Ttl:     5,
 			Headers: []string{},
-			Payload: node.neighbors,
+			Payload: NODE.neighbors,
 		}.ToAny().Wrapped(id)
 	}
 consumerLoop:
@@ -111,28 +115,27 @@ consumerLoop:
 		case msg := <-receiverChan:
 			switch msg.Proto {
 			case MESSAGE_PROTOS.LSR:
-				manageLSRMsg(ctx, msg, senderChan, node)
+				manageLSRMsg(ctx, msg, senderChan, NODE)
 			case MESSAGE_PROTOS.FLOOD:
-				manageFloodMsg(ctx, msg, senderChan, node)
+				manageFloodMsg(ctx, msg, senderChan, NODE)
 			default:
 				log.Println("ERROR: Invalid message proto received!", msg.Proto)
 			}
 		case <-c:
 			log.Println("Interrupt signal received! Stopping node...")
-			senderChan <- ProtocolMsg[string]{
-				Proto:   MESSAGE_PROTOS.LSR,
-				Type:    "message",
-				From:    FULL_NODE_ID,
-				To:      "sec20.topologia2.nodo6.nodoa",
-				Ttl:     5,
-				Headers: []string{},
-				Payload: "Hola",
-			}.ToAny().Wrapped("sec20.topologia2.nodo6.nodob")
+			// senderChan <- ProtocolMsg[string]{
+			// 	Proto:   MESSAGE_PROTOS.LSR,
+			// 	Type:    "message",
+			// 	From:    FULL_NODE_ID,
+			// 	To:      "sec20.topologia2.nodo6.nodoa",
+			// 	Ttl:     5,
+			// 	Headers: []string{},
+			// 	Payload: "Hola",
+			// }.ToAny().Wrapped("sec20.topologia2.nodo6.nodob")
+			// time.Sleep(2 * time.Second)
 			break consumerLoop
 		}
 	}
-
-	time.Sleep(2 * time.Second)
 
 	cancelCtx()
 	wg.Wait()
@@ -156,9 +159,7 @@ func manageLSRMsg(ctx context.Context, msg ProtocolMsg[any], senderChan chan<- M
 		case "hello":
 			// Do not retransmit. Optional: announce my state (INFO) to neighbors to bootstrap.
 			info := make(map[string]int, len(node.neighbors))
-			for k, v := range node.neighbors {
-				info[k] = v
-			}
+			maps.Copy(info, node.neighbors)
 			forward := ProtocolMsg[any]{
 				Proto:   MESSAGE_PROTOS.LSR,
 				Type:    "info",
@@ -356,4 +357,64 @@ func sendMsgs(ctx context.Context, wg *sync.WaitGroup, rdb *redis.Client, sender
 			return
 		}
 	}
+}
+
+func readStdin(ctx context.Context, wg *sync.WaitGroup, sendChan chan<- MsgWrapper[any], receiverChan chan<- ProtocolMsg[any]) {
+	defer wg.Done()
+	log.Println("Reading messages from stdin...")
+	defer log.Println("Done reading from stdin!")
+
+	scanner := bufio.NewScanner(os.Stdin)
+	// optionally, resize scanner's capacity for lines over 64K, see next example
+	for scanner.Scan() {
+		line := scanner.Text()
+		lineParts := strings.Split(line, " ")
+
+		msg := MsgWrapper[any]{}
+		switch lineParts[0] {
+		case "hello":
+			msg.InnerMsg = ProtocolMsg[any]{
+				Proto:   NODE_TYPE,
+				Type:    "hello",
+				From:    FULL_NODE_ID,
+				To:      "broadcast",
+				Ttl:     5,
+				Headers: rotateHeaders(nil, FULL_NODE_ID),
+				Payload: "",
+			}
+			msg.TargetChannel = "broadcast"
+		case "info":
+			msg.TargetChannel = "broadcast"
+			msg.InnerMsg = ProtocolMsg[any]{
+				Proto:   NODE_TYPE,
+				Type:    "info",
+				From:    FULL_NODE_ID,
+				To:      "broadcast",
+				Ttl:     5,
+				Headers: rotateHeaders(nil, FULL_NODE_ID),
+				Payload: NODE.neighbors,
+			}
+		case "send":
+			target := lineParts[len(lineParts)-1]
+			receiverChan <- ProtocolMsg[any]{
+				Proto:   NODE_TYPE,
+				Type:    "message",
+				From:    FULL_NODE_ID,
+				To:      target,
+				Ttl:     6,
+				Headers: rotateHeaders(nil, FULL_NODE_ID),
+				Payload: strings.Join(lineParts[1:len(lineParts)-1], " "),
+			}
+			continue
+		default:
+			log.Println("Invalid command!")
+		}
+
+		select {
+		case sendChan <- msg:
+		case <-ctx.Done():
+			return
+		}
+	}
+
 }
