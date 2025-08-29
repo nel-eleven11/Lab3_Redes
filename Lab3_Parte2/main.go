@@ -18,12 +18,12 @@ import (
 
 const NODE_ID = "nodo6"
 
-var FULL_NODE_ID = "sec20.topologia2." + NODE_ID + ".nodoc"
+var FULL_NODE_ID = formatRedisChannel(NODE_ID)
 var NODE_TYPE string
 
-var NODE = NewNode(formatRedisChannel("nodo6"), map[string]int{
+var NODE = NewNode(formatRedisChannel(NODE_ID), map[string]int{
 	// formatRedisChannel("nodo1"): 3,
-	"sec20.topologia2.nodo6.nodob": 5,
+	"sec20.topologia2.nodo10": 5,
 	// "sec20.topologia2.nodo6.nodoc": 3,
 })
 
@@ -272,13 +272,6 @@ func manageFloodMsg(ctx context.Context, msg ProtocolMsg[any], senderChan chan<-
 	// Reduce TTL by 1
 	msg.Ttl--
 
-	// Get the neighbors from the hardcoded configuration
-	// neighbors := []string{
-	// 	formatRedisChannel("nodo1"),
-	// 	formatRedisChannel("nodo2"),
-	// 	formatRedisChannel("nodo4"),
-	// }
-
 	// Forward the message to all neighbors except the sender
 	for neighbor := range nodes.neighbors {
 		if neighbor != msg.From {
@@ -326,7 +319,7 @@ func parseMsgs(ctx context.Context, wg *sync.WaitGroup, rdb *redis.Client, recei
 			var messageMsg ProtocolMsg[any]
 			err := json.Unmarshal([]byte(msg), &messageMsg)
 			if err == nil {
-				log.Printf("Received message: `%s` -> `%s`(ttl: %d):\n%#v", messageMsg.From, messageMsg.To, messageMsg.Ttl, messageMsg.Payload)
+				log.Printf("Received message:%s\n`%s` -> `%s`(ttl: %d):\n%#v", msg, messageMsg.From, messageMsg.To, messageMsg.Ttl, messageMsg.Payload)
 				receiverChan <- messageMsg
 			} else {
 				log.Printf("Received invalid message! %s\n%s", err, msg)
@@ -346,11 +339,11 @@ func sendMsgs(ctx context.Context, wg *sync.WaitGroup, rdb *redis.Client, sender
 	for {
 		select {
 		case receivedMsg := <-senderChan:
-			log.Printf("Sending msg:\n%#v", receivedMsg)
 			jsonString, err := json.Marshal(receivedMsg.InnerMsg)
 			if err != nil {
 				log.Panicf("Failed to marshal json: %#v", receivedMsg)
 			}
+			log.Printf("Sending msg:\n%#v\n%s", receivedMsg, jsonString)
 			rdb.Publish(ctx, receivedMsg.TargetChannel, jsonString)
 			log.Printf("Done!")
 		case <-ctx.Done():
@@ -365,12 +358,12 @@ func readStdin(ctx context.Context, wg *sync.WaitGroup, sendChan chan<- MsgWrapp
 	defer log.Println("Done reading from stdin!")
 
 	scanner := bufio.NewScanner(os.Stdin)
+	msg := MsgWrapper[any]{}
 	// optionally, resize scanner's capacity for lines over 64K, see next example
 	for scanner.Scan() {
 		line := scanner.Text()
 		lineParts := strings.Split(line, " ")
 
-		msg := MsgWrapper[any]{}
 		switch lineParts[0] {
 		case "hello":
 			msg.InnerMsg = ProtocolMsg[any]{
@@ -406,6 +399,17 @@ func readStdin(ctx context.Context, wg *sync.WaitGroup, sendChan chan<- MsgWrapp
 				Payload: strings.Join(lineParts[1:len(lineParts)-1], " "),
 			}
 			continue
+		case "sendd":
+			msg.TargetChannel = lineParts[len(lineParts)-1]
+			msg.InnerMsg = ProtocolMsg[any]{
+				Proto:   NODE_TYPE,
+				Type:    "message",
+				From:    FULL_NODE_ID,
+				To:      msg.TargetChannel,
+				Ttl:     5,
+				Headers: rotateHeaders(nil, FULL_NODE_ID),
+				Payload: strings.Join(lineParts[1:len(lineParts)-1], " "),
+			}
 		default:
 			log.Println("Invalid command!")
 		}
