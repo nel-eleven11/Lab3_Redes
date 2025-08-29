@@ -22,9 +22,7 @@ var FULL_NODE_ID = formatRedisChannel(NODE_ID)
 var NODE_TYPE string
 
 var NODE = NewNode(formatRedisChannel(NODE_ID), map[string]int{
-	// formatRedisChannel("nodo1"): 3,
-	"sec20.topologia2.nodo10": 5,
-	// "sec20.topologia2.nodo6.nodoc": 3,
+	formatRedisChannel("nodo7"): 1,
 })
 
 var MESSAGE_PROTOS = struct {
@@ -374,6 +372,17 @@ func readStdin(ctx context.Context, wg *sync.WaitGroup, sendChan chan<- MsgWrapp
 				Ttl:     5,
 				Headers: rotateHeaders(nil, FULL_NODE_ID),
 				Payload: "",
+			}
+			msg.TargetChannel = "broadcast"
+		case "broadcast":
+			msg.InnerMsg = ProtocolMsg[any]{
+				Proto:   NODE_TYPE,
+				Type:    "message",
+				From:    FULL_NODE_ID,
+				To:      "broadcast",
+				Ttl:     5,
+				Headers: rotateHeaders(nil, FULL_NODE_ID),
+				Payload: strings.Join(lineParts[1:], " "),
 			}
 			msg.TargetChannel = "broadcast"
 		case "info":
