@@ -412,6 +412,7 @@ func readStdin(ctx context.Context, wg *sync.WaitGroup, sendChan chan<- MsgWrapp
 			}
 		default:
 			log.Println("Invalid command!")
+			continue
 		}
 
 		select {
