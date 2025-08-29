@@ -36,7 +36,7 @@ var MESSAGE_PROTOS = struct {
 func formatRedisChannel(nodeId string) string {
 	// FIXME: uncomment line below
 	// return "sec20.topologia2." + nodeId
-	return "sec20.topologia2." + nodeId + ".prueba1"
+	return "sec20.topologia2." + nodeId
 }
 
 func main() {
@@ -374,17 +374,32 @@ func readStdin(ctx context.Context, wg *sync.WaitGroup, sendChan chan<- MsgWrapp
 				Payload: "",
 			}
 			msg.TargetChannel = "broadcast"
-		case "broadcast": // Broadcast a message
-			msg.InnerMsg = ProtocolMsg[any]{
-				Proto:   NODE_TYPE,
-				Type:    "message",
-				From:    FULL_NODE_ID,
-				To:      "broadcast",
-				Ttl:     5,
-				Headers: rotateHeaders(nil, FULL_NODE_ID),
-				Payload: strings.Join(lineParts[1:], " "),
+
+			select {
+			case sendChan <- msg:
+			case <-ctx.Done():
+				return
 			}
-			msg.TargetChannel = "broadcast"
+		case "broadcast": // Broadcast a message
+			for v := range NODE.neighbors {
+				msg.InnerMsg = ProtocolMsg[any]{
+					Proto:   NODE_TYPE,
+					Type:    "message",
+					From:    FULL_NODE_ID,
+					To:      "broadcast",
+					Ttl:     5,
+					Headers: rotateHeaders(nil, FULL_NODE_ID),
+					Payload: strings.Join(lineParts[1:], " "),
+				}
+				msg.TargetChannel = v
+
+				select {
+				case sendChan <- msg:
+				case <-ctx.Done():
+					return
+				}
+			}
+			continue
 		case "info": // Send info to all neighbours
 			msg.TargetChannel = "broadcast"
 			msg.InnerMsg = ProtocolMsg[any]{
