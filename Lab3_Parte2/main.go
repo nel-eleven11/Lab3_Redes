@@ -363,7 +363,7 @@ func readStdin(ctx context.Context, wg *sync.WaitGroup, sendChan chan<- MsgWrapp
 		lineParts := strings.Split(line, " ")
 
 		switch lineParts[0] {
-		case "hello":
+		case "hello": // Send a hello message to all neighbours
 			msg.InnerMsg = ProtocolMsg[any]{
 				Proto:   NODE_TYPE,
 				Type:    "hello",
@@ -374,7 +374,7 @@ func readStdin(ctx context.Context, wg *sync.WaitGroup, sendChan chan<- MsgWrapp
 				Payload: "",
 			}
 			msg.TargetChannel = "broadcast"
-		case "broadcast":
+		case "broadcast": // Broadcast a message
 			msg.InnerMsg = ProtocolMsg[any]{
 				Proto:   NODE_TYPE,
 				Type:    "message",
@@ -385,7 +385,7 @@ func readStdin(ctx context.Context, wg *sync.WaitGroup, sendChan chan<- MsgWrapp
 				Payload: strings.Join(lineParts[1:], " "),
 			}
 			msg.TargetChannel = "broadcast"
-		case "info":
+		case "info": // Send info to all neighbours
 			msg.TargetChannel = "broadcast"
 			msg.InnerMsg = ProtocolMsg[any]{
 				Proto:   NODE_TYPE,
@@ -396,10 +396,10 @@ func readStdin(ctx context.Context, wg *sync.WaitGroup, sendChan chan<- MsgWrapp
 				Headers: rotateHeaders(nil, FULL_NODE_ID),
 				Payload: NODE.neighbors,
 			}
-		case "send":
+		case "send": // Send lsr package to a specific node
 			target := lineParts[len(lineParts)-1]
 			receiverChan <- ProtocolMsg[any]{
-				Proto:   NODE_TYPE,
+				Proto:   MESSAGE_PROTOS.LSR,
 				Type:    "message",
 				From:    FULL_NODE_ID,
 				To:      target,
@@ -408,7 +408,7 @@ func readStdin(ctx context.Context, wg *sync.WaitGroup, sendChan chan<- MsgWrapp
 				Payload: strings.Join(lineParts[1:len(lineParts)-1], " "),
 			}
 			continue
-		case "sendd":
+		case "sendd": // Send direct message to node (bypass network)
 			msg.TargetChannel = lineParts[len(lineParts)-1]
 			msg.InnerMsg = ProtocolMsg[any]{
 				Proto:   NODE_TYPE,
